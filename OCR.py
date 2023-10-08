@@ -9,7 +9,7 @@ from sys import argv
 
 from scipy.ndimage import rotate
 
-def skew_correction(image):
+def skew_correction(image, non_processed):
     def determine_score(arr, angle):
         data = rotate(arr, angle, reshape=False, order=0)
         histogram = np.sum(data, axis=1, dtype=float)
@@ -31,7 +31,7 @@ def skew_correction(image):
     (h, w) = image.shape[:2]
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
-    corrected = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, #thresh should be image
+    corrected = cv2.warpAffine(non_processed, M, (w, h), flags=cv2.INTER_CUBIC, #thresh should be image
             borderMode=cv2.BORDER_REPLICATE)
 
     return best_angle, corrected
@@ -46,14 +46,19 @@ def preprocess_frame(img):
     img = cv2.GaussianBlur(img,(5,5),0)
     img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY, 5, 4) 
     img = cv2.bitwise_not(img)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 1))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (8, 1))
     img = cv2.dilate(img, kernel, iterations=1)
 
-    highlights = img.copy()
+    return img
 
+def getPotentialTextAreas(orig, processed):
+
+    highlights = orig.copy()
+    
     kept_contours = []
+    text_areas = []
 
-    contours, hierarchy = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for i in range(len(contours)):
         
         c = contours[i]
@@ -78,23 +83,25 @@ def preprocess_frame(img):
             kept_contours.append((x, y, w, h))
 
             cropped = orig[y:y+h, x:x+w]
+            cropped_processed = cv2.cvtColor(processed[y:y+h,x:x+w], cv2.COLOR_GRAY2BGR)
 
-            output_image[y:y+h, x:x+w] = cropped
-            angle, deskewed = skew_correction(cropped)
+
+            angle, deskewed = skew_correction(cropped_processed, cropped)
+            print(angle)
 
             # angle, deskewed = skew_correction(cv2.resize(cropped, (720, 480)))
 
             if deskewed is not None:
-                cv2.rectangle(highlights, (x, y), (x+w, y+h), (255,255,255), 2)
+                cv2.rectangle(highlights, (x, y), (x+w, y+h), (0,0,255), 2)
                 cv2.imshow('test', deskewed)
-                if cv2.waitKey(1) == ord('q'):
+                if cv2.waitKey(500) == ord('q'):
                     cv2.destroyAllWindows()
                     exit()
 
     cv2.imshow("highlights", highlights)
     cv2.waitKey(5)
 
-    return output_image
+    return orig
 
 def main(args):
 
@@ -149,6 +156,7 @@ def main(args):
             cam_read_attempts = 0
 
             processed = preprocess_frame(frame)
+            textAreas = getPotentialTextAreas(frame, processed)
 
             continue
 
