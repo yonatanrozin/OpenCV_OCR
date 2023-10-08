@@ -9,17 +9,15 @@ from sys import argv
 
 from scipy.ndimage import rotate
 
-def skew_correction(image, delta=1, limit=5):
+def skew_correction(image):
     def determine_score(arr, angle):
         data = rotate(arr, angle, reshape=False, order=0)
         histogram = np.sum(data, axis=1, dtype=float)
         score = np.sum((histogram[1:] - histogram[:-1]) ** 2, dtype=float)
         return histogram, score
-    try:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    except: 
-        print("caught!")
-        return None, None
+    
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1] 
 
     angles = range(-30,30, 2)
@@ -33,7 +31,7 @@ def skew_correction(image, delta=1, limit=5):
     (h, w) = image.shape[:2]
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
-    corrected = cv2.warpAffine(thresh, M, (w, h), flags=cv2.INTER_CUBIC, #thresh should be image
+    corrected = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, #thresh should be image
             borderMode=cv2.BORDER_REPLICATE)
 
     return best_angle, corrected
@@ -51,6 +49,8 @@ def preprocess_frame(img):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 1))
     img = cv2.dilate(img, kernel, iterations=1)
 
+    highlights = img.copy()
+
     kept_contours = []
 
     contours, hierarchy = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -58,13 +58,16 @@ def preprocess_frame(img):
         
         c = contours[i]
         x,y,w,h = cv2.boundingRect(c)
-        if w < h or w * h < 500: #find horizontal contours only + ignore small ones
+        if w < h or w*h < 4000: #find horizontal contours only + ignore small ones
             continue
         
-        x-=10
-        y-=10
-        w+=20
-        h+=20
+        x-=20
+        y-=20
+        w+=40
+        h+=40
+
+        if x < 0 or y < 0:
+            continue
 
         enclosed = False
         for c_check in kept_contours:
@@ -75,17 +78,22 @@ def preprocess_frame(img):
             kept_contours.append((x, y, w, h))
 
             cropped = orig[y:y+h, x:x+w]
-            output_image[y:y+h, x:x+w] = cropped
 
+            output_image[y:y+h, x:x+w] = cropped
             angle, deskewed = skew_correction(cropped)
 
+            # angle, deskewed = skew_correction(cv2.resize(cropped, (720, 480)))
+
             if deskewed is not None:
+                cv2.rectangle(highlights, (x, y), (x+w, y+h), (255,255,255), 2)
                 cv2.imshow('test', deskewed)
-                cv2.waitKey(50)
+                if cv2.waitKey(1) == ord('q'):
+                    cv2.destroyAllWindows()
+                    exit()
 
+    cv2.imshow("highlights", highlights)
+    cv2.waitKey(5)
 
-
-    
     return output_image
 
 def main(args):
