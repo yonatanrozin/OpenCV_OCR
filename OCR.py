@@ -11,33 +11,10 @@ from scipy.ndimage import rotate
 cam_index = 0
 capture_api = cv2.CAP_DSHOW
 
-def skew_correction(image, non_processed):
-    def determine_score(arr, angle):
-        data = rotate(arr, angle, reshape=False, order=0)
-        histogram = np.sum(data, axis=1, dtype=float)
-        score = np.sum((histogram[1:] - histogram[:-1]) ** 2, dtype=float)
-        return histogram, score
-    
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1] 
-
-    angles = range(-30,30, 2)
-    scores = []
-    for angle in angles:
-        histogram, score = determine_score(thresh, angle)
-        scores.append(score)
-
-    best_angle = angles[scores.index(max(scores))]
-
-    (h, w) = image.shape[:2]
-    center = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
-    corrected = cv2.warpAffine(non_processed, M, (w, h), flags=cv2.INTER_CUBIC, #thresh should be image
-            borderMode=cv2.BORDER_REPLICATE)
-
-    return best_angle, corrected
-
+# pre-processing for finding long contours that may be text:
+#   blurring for anti noise
+#   adaptive thresholding for flexible binarization
+#   inverting + horizontal dilation - causes letters in lines of text to blur together into single contours
 def preprocess_frame(img):
 
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -46,8 +23,39 @@ def preprocess_frame(img):
     img = cv2.bitwise_not(img)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
     img = cv2.dilate(img, kernel, iterations=1)
-
     return img
+
+# receives an image, probably from cv2.VideoCapture.read()
+#   pre-processes image to prepare for contour detection
+#   performs contour detection, finding rotated (min-area) rect for each
+#   imposes a slight width threshold on results 
+#   returns list of cropped rectangles, aligned horizontally
+def get_potential_text_areas(img):
+
+    processed = preprocess_frame(img)
+    contours, hierarchy = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    aligned_areas = []
+    for contour in contours:
+
+        rect = cv2.minAreaRect(contour)
+        if rect[1][0] < 50:
+            continue
+
+        center, size, theta = rect
+
+        size = (size[0]*1.2, size[1]*1.2) # include some whitespace
+
+        # align (potential) text using angle of rotated bounding box
+        center, size = tuple(map(int, center)), tuple(map(int, size))
+        M = cv2.getRotationMatrix2D( center, theta, 1)
+        dst = cv2.warpAffine(img, M, (img.shape[1], img.shape[0]))
+        area = cv2.getRectSubPix(dst, size, center)
+        if theta > 45:
+            area = cv2.rotate(area, cv2.ROTATE_90_CLOCKWISE)
+
+        aligned_areas.append(area)
+    return aligned_areas
 
 def main(args):
 
@@ -79,6 +87,8 @@ def main(args):
 
     cam_read_attempts = 0
 
+    margin = 10
+
     while True:
 
         cam_read_attempts += 1
@@ -99,97 +109,77 @@ def main(args):
         if success:
             cam_read_attempts = 0
 
-            processed = preprocess_frame(frame)
+            areas = get_potential_text_areas(frame)
 
-            contours, hierarchy = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            xOff = margin
+            yOff = margin
+            rowXMax = 0
 
-            highlights = frame.copy() # to draw rectangles without interfering with CV
+            #single blank image to store potential text areas for efficient OCR
+            totalScan = np.zeros([1000,1000],dtype=np.uint8) 
+            totalScan.fill(255) # or img[:] = 255
 
-            for c in contours:
-                x, y, w, h = cv2.boundingRect(c)
+            #parallel to scan but with colors - for use in displaying results
+            scan_colors = np.zeros([1000,1000, 3], dtype=np.uint8)
 
-                if w < 50:
-                    continue
+            hScan, wScan = totalScan.shape
+            for area in areas:
 
-                x -= 10
-                y -= 10
-                w += 20
-                h += 20
-
-                angleRect = cv2.minAreaRect(c)
-
-                # cv2.rectangle(highlights, (x, y), (x+w, y+h), (255, 0, 0), 2)
                 try:
-                    cropped = frame[y:y+h,x:x+w]
-                    highlights[y:y+h,x:x+w] = cv2.cvtColor(processed[y:y+h,x:x+w], cv2.COLOR_GRAY2BGR)
-                    cv2.putText(highlights, str(int(angleRect[2])), (x-30, y-20), cv2.FONT_HERSHEY_PLAIN, 1, (0,0,255))
-
+                    grey = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
+                    ret, thresh = cv2.threshold(grey, 100, 255, cv2.THRESH_BINARY)
+                    kernel = np.ones((3, 3), np.uint8) 
+                    eroded = cv2.erode(thresh, kernel) 
                 except:
-                    print('cant')
+                    print('error preprocessing text area - skipping.')
+                    continue 
 
-            cv2.imshow('view', highlights)
-            cv2.waitKey(10)
+                processed = eroded
+                h, w = processed.shape
+                
+                if xOff + w > wScan:
+                    print("ran out of space!")
+                    break
+                if yOff + h < hScan:
+                    totalScan[yOff:yOff+h, xOff: xOff+w] = processed
+                    scan_colors[yOff:yOff+h, xOff: xOff+w] = area
+                    yOff += h + margin
+                    if w > rowXMax:
+                        rowXMax = w
+                else:
+                    xOff = rowXMax + margin
+                    yOff = margin
+                    totalScan[yOff:yOff+h, xOff: xOff+w] = processed
+                    scan_colors[yOff:yOff+h, xOff: xOff+w] = area
+                    yOff += h + margin
+                    rowXMax = w
 
+            resultYOff = margin
 
-            # data = pytesseract.image_to_data(processed, lang="eng_best", config='--psm 11').split('\n')[:-1] #ignore last item
-
-            # data_labels = data[0].split('\t')
-            # data_entries = [row.split('\t') for row in data[1:]]
-
-            # for entry in data_entries:
-            #     data_parsed = dict(zip(data_labels, entry))
-            #     if float(data_parsed['conf']) < 50:
-            #         continue
-            #     print(entry, float(data_parsed['conf']))
-
-
-
-
-            continue
-            textAreas = getPotentialTextAreas(frame, processed)
-
-            for area in textAreas:
-                grey = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
-
-                # grey = cv2.bitwise_not(grey)
-
-                # area_thresh = cv2.adaptiveThreshold(grey, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY, 5, 4) 
-                ret, area_thresh = cv2.threshold(grey,0,255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-
-                area_text = pytesseract.image_to_string(processed, config='--psm 3')
-                print(area_text)
-
-                cv2.imshow('test', area_thresh)
-                if cv2.waitKey(500) == ord('q'):
-                    cv2.destroyAllWindows()
-                    exit()
-
-            continue
-
-            output_frame = processed.copy()
-
-            data = pytesseract.image_to_data(processed, config='--psm 11').split('\n')[:-1] #ignore last item
-
+            data = pytesseract.image_to_data(totalScan, lang="eng_best", config='--psm 11').split('\n')[:-1] #ignore last item
             data_labels = data[0].split('\t')
             data_entries = [row.split('\t') for row in data[1:]]
-
-            cv2.imshow('test', output_frame)
-            cv2.waitKey(50)
-
-            continue
-
-            if not data:
-                continue
+            
             for entry in data_entries:
                 data_parsed = dict(zip(data_labels, entry))
-                if float(data_parsed['conf']) < 50:
+                if float(data_parsed['conf']) < 70 or len(data_parsed['text']) < 3: 
                     continue
+                print(data_parsed)
+                x, y, w, h = (
+                    int(float(data_parsed['left'])),
+                    int(float(data_parsed['top'])),
+                    int(float(data_parsed['width'])),
+                    int(float(data_parsed['height']))
+                )
+                frame[resultYOff:resultYOff+h, margin:margin+w] = scan_colors[y:y+h, x:x+w]
+                cv2.putText(frame, data_parsed['text'], (margin + w + 30, resultYOff+h), cv2.FONT_HERSHEY_PLAIN, h/10, (0,255,0), h//10)
+                resultYOff += margin + h
 
-                (x, y, w, h) = (
-                    int(float(data_parsed['left'])), int(float(data_parsed['top'])),
-                    int(float(data_parsed['width'])), int(float(data_parsed['height'])))
-                cv2.rectangle(output_frame, (x, y), (x+w, y+h), (255,0,0), 1)
-                cv2.putText(output_frame, data_parsed['text'], (x, y-10), cv2.FONT_HERSHEY_PLAIN, .5, (0,0,255))
+            cv2.imshow('test', frame)
+            cv2.waitKey(500)
+
+            cv2.imshow('view',scan_colors)
+            cv2.waitKey(5)
 
                 
 main(argv[1:])
