@@ -6,8 +6,10 @@ import cv2
 import pytesseract
 import numpy as np
 from sys import argv
-
 from scipy.ndimage import rotate
+
+cam_index = 0
+capture_api = cv2.CAP_DSHOW
 
 def skew_correction(image, non_processed):
     def determine_score(arr, angle):
@@ -38,70 +40,14 @@ def skew_correction(image, non_processed):
 
 def preprocess_frame(img):
 
-    output_image = np.ones(img.shape, 'uint8') * 255
-
-    orig = img.copy()
-
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img = cv2.GaussianBlur(img,(5,5),0)
+    img = cv2.GaussianBlur(img,(3,3),0)
     img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY, 5, 4) 
     img = cv2.bitwise_not(img)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (8, 1))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
     img = cv2.dilate(img, kernel, iterations=1)
 
     return img
-
-def getPotentialTextAreas(orig, processed):
-
-    highlights = orig.copy()
-    
-    kept_contours = []
-    text_areas = []
-
-    contours, hierarchy = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for i in range(len(contours)):
-        
-        c = contours[i]
-        x,y,w,h = cv2.boundingRect(c)
-        if w < h or w*h < 4000: #find horizontal contours only + ignore small ones
-            continue
-        
-        x-=20
-        y-=20
-        w+=40
-        h+=40
-
-        if x < 0 or y < 0:
-            continue
-
-        enclosed = False
-        for c_check in kept_contours:
-            if x > c_check[0] and x+w < c_check[0]+c_check[3] and y > c_check[1] and y+h < c_check[1] + c_check[3]:
-                enclosed = True
-                break
-        if not enclosed:
-            kept_contours.append((x, y, w, h))
-
-            cropped = orig[y:y+h, x:x+w]
-            cropped_processed = cv2.cvtColor(processed[y:y+h,x:x+w], cv2.COLOR_GRAY2BGR)
-
-
-            angle, deskewed = skew_correction(cropped_processed, cropped)
-            print(angle)
-
-            # angle, deskewed = skew_correction(cv2.resize(cropped, (720, 480)))
-
-            if deskewed is not None:
-                cv2.rectangle(highlights, (x, y), (x+w, y+h), (0,0,255), 2)
-                cv2.imshow('test', deskewed)
-                if cv2.waitKey(500) == ord('q'):
-                    cv2.destroyAllWindows()
-                    exit()
-
-    cv2.imshow("highlights", highlights)
-    cv2.waitKey(5)
-
-    return orig
 
 def main(args):
 
@@ -126,10 +72,7 @@ def main(args):
         print("\nAvailable camera indexes: ", available_cameras)
         exit()
 
-    cam_index = 0
     # cam = cv2.VideoCapture(cam_index)
-
-    capture_api = cv2.CAP_DSHOW
     cam = cv2.VideoCapture(cam_index, capture_api)
 
     pytesseract.pytesseract.tesseract_cmd = r'C:\dev\Tesseract-OCR\tesseract.exe'
@@ -143,12 +86,13 @@ def main(args):
         print(f"Getting new frame - attempt #{cam_read_attempts}")
         success, frame = cam.read()
         
+        #quit after 5 consecutive failed read attempts
         if not success:
             if cam_read_attempts < 5:
                 print(f"unsuccessful camera read. Retrying.")
             else:
-                print("\nError reading from camera. Try a different camera index or a backend API such as 'cv2.CAP_MSMF' or 'cv2.CAP_DSHOW'")
-                print('Run "OCR.py list" to get list of available devices')
+                print("\nError reading from camera. Try a different camera index or a backend API such as 'cv2.CAP_MSMF' or 'cv2.CAP_DSHOW' in 'cv2.VideoCapture() above")
+                print('Run "OCR.py list" in command line to get list of available video input devices')
                 print("See OpenCV docs here for info on video capture APIs: https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html#ga023786be1ee68a9105bf2e48c700294d")
                 exit()
 
@@ -156,7 +100,69 @@ def main(args):
             cam_read_attempts = 0
 
             processed = preprocess_frame(frame)
+
+            contours, hierarchy = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            highlights = frame.copy() # to draw rectangles without interfering with CV
+
+            for c in contours:
+                x, y, w, h = cv2.boundingRect(c)
+
+                if w < 50:
+                    continue
+
+                x -= 10
+                y -= 10
+                w += 20
+                h += 20
+
+                angleRect = cv2.minAreaRect(c)
+
+                # cv2.rectangle(highlights, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                try:
+                    cropped = frame[y:y+h,x:x+w]
+                    highlights[y:y+h,x:x+w] = cv2.cvtColor(processed[y:y+h,x:x+w], cv2.COLOR_GRAY2BGR)
+                    cv2.putText(highlights, str(int(angleRect[2])), (x-30, y-20), cv2.FONT_HERSHEY_PLAIN, 1, (0,0,255))
+
+                except:
+                    print('cant')
+
+            cv2.imshow('view', highlights)
+            cv2.waitKey(10)
+
+
+            # data = pytesseract.image_to_data(processed, lang="eng_best", config='--psm 11').split('\n')[:-1] #ignore last item
+
+            # data_labels = data[0].split('\t')
+            # data_entries = [row.split('\t') for row in data[1:]]
+
+            # for entry in data_entries:
+            #     data_parsed = dict(zip(data_labels, entry))
+            #     if float(data_parsed['conf']) < 50:
+            #         continue
+            #     print(entry, float(data_parsed['conf']))
+
+
+
+
+            continue
             textAreas = getPotentialTextAreas(frame, processed)
+
+            for area in textAreas:
+                grey = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
+
+                # grey = cv2.bitwise_not(grey)
+
+                # area_thresh = cv2.adaptiveThreshold(grey, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY, 5, 4) 
+                ret, area_thresh = cv2.threshold(grey,0,255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+
+                area_text = pytesseract.image_to_string(processed, config='--psm 3')
+                print(area_text)
+
+                cv2.imshow('test', area_thresh)
+                if cv2.waitKey(500) == ord('q'):
+                    cv2.destroyAllWindows()
+                    exit()
 
             continue
 
