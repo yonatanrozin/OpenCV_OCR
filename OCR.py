@@ -11,6 +11,8 @@ from scipy.ndimage import rotate
 cam_index = 0
 capture_api = cv2.CAP_DSHOW
 
+margin = 10 # margin width (in px) between text areas / image borders
+
 # pre-processing for finding long contours that may be text:
 #   blurring for anti noise
 #   adaptive thresholding for flexible binarization
@@ -39,7 +41,7 @@ def get_potential_text_areas(img):
     for contour in contours:
 
         rect = cv2.minAreaRect(contour)
-        if rect[1][0] < 50:
+        if rect[1][0] < 20:
             continue
 
         center, size, theta = rect
@@ -56,6 +58,82 @@ def get_potential_text_areas(img):
 
         aligned_areas.append(area)
     return aligned_areas
+
+def assemble_text_scan_image(img, areas):
+
+    xOff = margin
+    yOff = margin
+    rowXMax = 0
+
+    #single blank image to store potential text areas for efficient OCR
+    totalScan = np.zeros([1000,1000],dtype=np.uint8) 
+    totalScan.fill(255) # or img[:] = 255
+
+    #parallel to scan but with colors - for use in displaying results
+    scan_colors = np.ones([1000,1000, 3], dtype=np.uint8) * 255
+
+    hScan, wScan = totalScan.shape
+    for area in areas:
+
+        try:
+            grey = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
+            ret, thresh = cv2.threshold(grey, 100, 255, cv2.THRESH_BINARY)
+            kernel = np.ones((3, 3), np.uint8) 
+            eroded = cv2.erode(thresh, kernel) 
+        except:
+            print('error preprocessing text area - skipping.')
+            continue 
+
+        processed = eroded
+        h, w = processed.shape
+        
+        if xOff + w > wScan:
+            print("ran out of space!")
+            break
+        if yOff + h < hScan:
+            totalScan[yOff:yOff+h, xOff: xOff+w] = processed
+            scan_colors[yOff:yOff+h, xOff: xOff+w] = area
+            yOff += h + margin
+            if w > rowXMax:
+                rowXMax = w
+        else:
+            xOff = rowXMax + margin
+            yOff = margin
+            totalScan[yOff:yOff+h, xOff: xOff+w] = processed
+            scan_colors[yOff:yOff+h, xOff: xOff+w] = area
+            yOff += h + margin
+            rowXMax = w
+
+    return totalScan, scan_colors
+
+def text_data_from_image(img):
+    data = pytesseract.image_to_data(img, lang="eng_best", config='--psm 12').split('\n')[:-1] #ignore last item
+    data_labels = data[0].split('\t')
+    data_values = [row.split('\t') for row in data[1:]]
+    data_entries = [dict(zip(data_labels, entry)) for entry in data_values]
+
+    return data_entries
+
+def overlay_results(img, data, scan_colors):
+    resultYOff = margin
+    for row in data:
+        if float(row['conf']) < 50 or len(row['text']) < 3: 
+            continue
+        print(row)
+        x, y, w, h = (
+            int(float(row['left'])),
+            int(float(row['top'])),
+            int(float(row['width'])),
+            int(float(row['height']))
+        )
+        if 0 in (w, h):
+            print("gotcha!")
+            continue
+        img[resultYOff:resultYOff+h, margin:margin+w] = scan_colors[y:y+h, x:x+w]
+        cv2.putText(img, row['text'], (margin + w + 30, resultYOff+h), cv2.FONT_HERSHEY_PLAIN, h/10, (0,255,0), h//10)
+        resultYOff += margin + h
+
+    return img
 
 def main(args):
 
@@ -87,8 +165,6 @@ def main(args):
 
     cam_read_attempts = 0
 
-    margin = 10
-
     while True:
 
         cam_read_attempts += 1
@@ -109,77 +185,21 @@ def main(args):
         if success:
             cam_read_attempts = 0
 
+            #detect areas containing long contours that may be text
             areas = get_potential_text_areas(frame)
 
-            xOff = margin
-            yOff = margin
-            rowXMax = 0
+            #get single image containing text areas to be scanned and parallel colored version for visuals
+            scan_image, colors = assemble_text_scan_image(frame, areas)
 
-            #single blank image to store potential text areas for efficient OCR
-            totalScan = np.zeros([1000,1000],dtype=np.uint8) 
-            totalScan.fill(255) # or img[:] = 255
+            #get a list of dict objects containing information per text detected in image
+            text_results = text_data_from_image(scan_image)
 
-            #parallel to scan but with colors - for use in displaying results
-            scan_colors = np.zeros([1000,1000, 3], dtype=np.uint8)
-
-            hScan, wScan = totalScan.shape
-            for area in areas:
-
-                try:
-                    grey = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
-                    ret, thresh = cv2.threshold(grey, 100, 255, cv2.THRESH_BINARY)
-                    kernel = np.ones((3, 3), np.uint8) 
-                    eroded = cv2.erode(thresh, kernel) 
-                except:
-                    print('error preprocessing text area - skipping.')
-                    continue 
-
-                processed = eroded
-                h, w = processed.shape
-                
-                if xOff + w > wScan:
-                    print("ran out of space!")
-                    break
-                if yOff + h < hScan:
-                    totalScan[yOff:yOff+h, xOff: xOff+w] = processed
-                    scan_colors[yOff:yOff+h, xOff: xOff+w] = area
-                    yOff += h + margin
-                    if w > rowXMax:
-                        rowXMax = w
-                else:
-                    xOff = rowXMax + margin
-                    yOff = margin
-                    totalScan[yOff:yOff+h, xOff: xOff+w] = processed
-                    scan_colors[yOff:yOff+h, xOff: xOff+w] = area
-                    yOff += h + margin
-                    rowXMax = w
-
-            resultYOff = margin
-
-            data = pytesseract.image_to_data(totalScan, lang="eng_best", config='--psm 11').split('\n')[:-1] #ignore last item
-            data_labels = data[0].split('\t')
-            data_entries = [row.split('\t') for row in data[1:]]
+            #overlay detected text and extracted string side-by-side on top of captured frame
+            output_image = overlay_results(frame, text_results, colors)
             
-            for entry in data_entries:
-                data_parsed = dict(zip(data_labels, entry))
-                if float(data_parsed['conf']) < 70 or len(data_parsed['text']) < 3: 
-                    continue
-                print(data_parsed)
-                x, y, w, h = (
-                    int(float(data_parsed['left'])),
-                    int(float(data_parsed['top'])),
-                    int(float(data_parsed['width'])),
-                    int(float(data_parsed['height']))
-                )
-                frame[resultYOff:resultYOff+h, margin:margin+w] = scan_colors[y:y+h, x:x+w]
-                cv2.putText(frame, data_parsed['text'], (margin + w + 30, resultYOff+h), cv2.FONT_HERSHEY_PLAIN, h/10, (0,255,0), h//10)
-                resultYOff += margin + h
+            cv2.imshow('test', output_image)
+            cv2.waitKey(50)
 
-            cv2.imshow('test', frame)
-            cv2.waitKey(500)
-
-            cv2.imshow('view',scan_colors)
-            cv2.waitKey(5)
 
                 
 main(argv[1:])
