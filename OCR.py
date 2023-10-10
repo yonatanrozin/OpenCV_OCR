@@ -10,6 +10,8 @@ import numpy as np
 import traceback
 from sys import argv
 
+
+
 #give reader time to read message
 while time.time() - launch_time < 2:
     pass
@@ -19,6 +21,8 @@ cam_index = 0
 capture_api = cv2.CAP_DSHOW
 # capture_api = cv2.CAP_MSMF
 # capture_api = None
+
+# pytesseract.pytesseract.tesseract_cmd = r'<full_path_to_your_tesseract_executable>'
 
 margin = 10 # margin width (in px) between text areas / image borders
 
