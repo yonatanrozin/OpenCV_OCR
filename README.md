@@ -27,3 +27,6 @@ Code to open camera will differ per device. Change your camera index by changing
   - ```<debug>```: include ```debug``` as the last argument to run in debug mode.
     - Opens additional windows containing intermediate OpenCV matrices generated during text scanning
     - Prints additional status messages to console, as well as writing them to a ```log.txt``` file.
+   
+## Pytesseract troubleshooting
+Tesseract must be installed and added to system PATH before pytesseract will work. See [here](https://tesseract-ocr.github.io/tessdoc/Installation.html) for installation instructions. The installation can be tested by running ```tesseract``` in a command prompt. If tesseract still isn't working, uncomment the line ```pytesseract.pytesseract.tesseract_cmd = r'<full_path_to_your_tesseract_executable>``` in OCR.py, providing the absolute path to the ```tesseract.exe``` file in the Tesseract directory.
