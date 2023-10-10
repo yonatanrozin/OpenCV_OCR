@@ -7,6 +7,7 @@ import subprocess as sp
 import cv2
 import pytesseract
 import numpy as np
+import traceback
 from sys import argv
 
 #give reader time to read message
@@ -23,9 +24,13 @@ margin = 10 # margin width (in px) between text areas / image borders
 
 show_intermediate = 'debug' in argv
 
+if show_intermediate:
+    logFile = open('log.txt', 'w+')
+
 def print_debug(msg):
     if show_intermediate:
         print(msg)
+        logFile.write(msg + '\n')
 
 # receives an image, performs some pre-processing to prepare for finding long contours that may be text:
 #   convert to grayscale
@@ -35,9 +40,9 @@ def print_debug(msg):
 def preprocess_frame(img):
     print_debug('applying greyscale +  blur')
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img = cv2.GaussianBlur(img,(3,3),0)
+    img = cv2.GaussianBlur(img,(9,9),0)
     # print_debug('applying adaptive threshold + dilation')
-    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV, 15, 4)
+    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV, 9, 4)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 10))
     img = cv2.dilate(img, kernel, iterations=1)
     return img
@@ -70,7 +75,7 @@ def get_potential_text_areas(img, processed):
 
         print_debug(f'Box shape: {size[1]}x{size[0]}, angle={theta}')
 
-        if size[0]*size[1] < 3000:
+        if size[0]*size[1] < 5000:
             print_debug('contour size below threshold, skipping.')
             continue
 
@@ -138,8 +143,8 @@ def assemble_text_scan_image(img, areas, centroids):
 
         print_debug('pre-processing area for text detection')
         processed = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
-        norm_matrix = np.zeros((img.shape[0], img.shape[1]))
-        processed = cv2.normalize(processed, norm_matrix, 0, 255, cv2.NORM_MINMAX)
+        # norm_matrix = np.zeros((img.shape[0], img.shape[1]))
+        # processed = cv2.normalize(processed, norm_matrix, 0, 255, cv2.NORM_MINMAX)
         processed = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY_INV +cv2.THRESH_OTSU)[1]
 
         h, w = processed.shape
@@ -242,8 +247,8 @@ def complete_text_from_image(input):
     #scan single image for text
     print_debug("\nGathering formatted text data from image...")
     text_results = text_data_from_image(scan_image, buffer)
-    results_filtered = [row for row in text_results if float(row['conf']) > 80 and 
-                        len(row['text']) > 0]
+    results_filtered = [row for row in text_results if float(row['conf']) > 60 and 
+                        len(row['text']) > 1 and not '?' in row['text']] 
 
     #overlay detected text and extracted string side-by-side on top of captured frame
     print_debug("\nDisplaying results...")
@@ -293,7 +298,10 @@ def main(args):
                 print('Opening webcam with capture API')
                 cam = cv2.VideoCapture(cam_index, capture_api)
 
+            video_duration = -1
+
         elif args[0] == 'video':
+
             try:
                 print("Getting video file")
                 video_file = args[1]
@@ -303,13 +311,26 @@ def main(args):
 
             cam = cv2.VideoCapture(video_file)
 
-        read_attempts = 0
+            video_fps = cam.get(cv2.CAP_PROP_FPS)
+            frameCount = cam.get(cv2.CAP_PROP_FRAME_COUNT)
+            video_duration = frameCount // video_fps
 
+            print_debug(f'video file loaded: {video_duration}s at {video_fps}fps.')
+
+        read_attempts = 0
+        vid_start_time = time.time()
         while True:
+            elapsed_time = time.time() - vid_start_time
+
+            if video_duration != -1:
+                video_frame_number = int(elapsed_time * video_fps)
+                if video_frame_number > frameCount:
+                    print("end of video file reached.")
+                    exit()
+                cam.set(cv2.CAP_PROP_POS_FRAMES, video_frame_number-1)
 
             read_attempts += 1
-
-            print_debug(f"Getting new frame - attempt #{read_attempts} for this frame")
+            print_debug(f"\n\nGetting new frame - attempt #{read_attempts} for this frame")
             success, latest_frame = cam.read()
             
             #quit after 5 consecutive failed read attempts
@@ -324,11 +345,14 @@ def main(args):
             if success:
                 read_attempts = 0
 
+                frame_process_start_time = time.time()
                 out_frame = complete_text_from_image(latest_frame)
+                frame_process_elapsed_time = time.time() - frame_process_start_time
+                print(f'Frame processing complete in {frame_process_elapsed_time:.2f}s.')
 
                 cv2.imshow('OCR Webcam', out_frame)
 
-                if cv2.waitKey() == ord('q'):
+                if cv2.waitKey(5) == ord('q'):
                     cv2.destroyAllWindows()
                     exit()
 
@@ -361,4 +385,9 @@ def main(args):
 totalScan = np.zeros([3000,3000],dtype=np.uint8) 
 scan_colors = np.ones([3000,3000, 3], dtype=np.uint8) * 255
 
-main(argv[1:])
+try:
+    main(argv[1:])
+except Exception as e:
+    logFile.write(traceback.format_exc())
+    print
+    raise e
