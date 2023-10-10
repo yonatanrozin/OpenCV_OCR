@@ -15,11 +15,12 @@ Performs OCR from webcam feed, image or video file.
 - ```git clone``` this repo into desired location
  
 ## Usage
+- Code to open camera will differ per device. Change your camera index by changing the line ```cam_index = 0``` towards the top of OCR.py. Additionally, your camera may require a specific capture API. You can use one by uncommenting one of the ```capture_api = ...``` lines below the cam_index line. More info about capture APIs can be found in the [OpenCV capture API docs](https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html#ga023786be1ee68a9105bf2e48c700294d).
 - ```cd``` into cloned directory
 - run ```python3 OCR.py <arg> <filepath (if needed)> <debug (optional)> in a command prompt
   - ```<arg>```: can be one of ```list```, ```image```, ```video``` or ```webcam```
     - List: list available camera indexes
-    - Image/video/webcam: specify media to scan for text. If using image or video, the following argument must be the path to the file.
+    - Image/video/webcam: specify media to scan for text. If using image or video, the following argument must be the path to the file. __Tested with .jpg and .mov photo/video formats. Other formats have not yet been tested.__
   - ```<filepath>```: used to specify a path to the image/video file to be scanned. You can drag and drop the file into the command prompt window to get the file path automatically.
   - ```<debug>```: include ```debug``` as the last argument to run in debug mode.
     - Opens additional windows containing intermediate OpenCV matrices generated during text scanning
