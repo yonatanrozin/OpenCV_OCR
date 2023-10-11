@@ -22,18 +22,18 @@ capture_api = cv2.CAP_DSHOW
 # capture_api = cv2.CAP_MSMF
 # capture_api = None
 
-# pytesseract.pytesseract.tesseract_cmd = r'<full_path_to_your_tesseract_executable>'
+# pytesseract.pytesseract.tesseract_cmd = r'./Tesseract-OCR/tesseract.exe'
 
-margin = 10 # margin width (in px) between text areas / image borders
+result_margin = 10 # margin width (in px) between text areas / image borders
 
-show_intermediate = 'debug' in argv
+debug_mode = 'debug' in argv
 
-if show_intermediate:
-    logFile = open('log.txt', 'w+')
+if debug_mode:
+    logFile = open('logs/log.txt', 'w+')
 
 def print_debug(msg):
-    if show_intermediate:
-        print(msg)
+    if debug_mode:
+        # print(msg)
         logFile.write(msg + '\n')
 
 # receives an image, performs some pre-processing to prepare for finding long contours that may be text:
@@ -46,9 +46,12 @@ def preprocess_frame(img):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img = cv2.GaussianBlur(img,(9,9),0)
     # print_debug('applying adaptive threshold + dilation')
-    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV, 9, 4)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 10))
+    img = cv2.adaptiveThreshold(img, 200, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV, 15, 2)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 3))
     img = cv2.dilate(img, kernel, iterations=1)
+
+    if debug_mode:
+        cv2.imwrite('logs/processed_frame.jpg', img)
     return img
 
 # receives an image, probably from cv2.VideoCapture.read()
@@ -65,7 +68,6 @@ def get_potential_text_areas(img, processed):
     contours, hierarchy = cv2.findContours(processed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     aligned_areas = []
-    centroids = []
 
     for i in range(len(contours)):
 
@@ -79,7 +81,7 @@ def get_potential_text_areas(img, processed):
 
         print_debug(f'Box shape: {size[1]}x{size[0]}, angle={theta}')
 
-        if size[0]*size[1] < 5000:
+        if size[0]*size[1] < 4000:
             print_debug('contour size below threshold, skipping.')
             continue
 
@@ -90,27 +92,16 @@ def get_potential_text_areas(img, processed):
         center, size = tuple(map(int, center)), tuple(map(int, size))
         M = cv2.getRotationMatrix2D( center, theta, 1)
 
-        # dst_processed = cv2.warpAffine(processed, M, (img.shape[1], img.shape[0]))
-        # area_processed = cv2.getRectSubPix(dst_processed, size, center)
-
-        # white_pixel_count = np.sum(area_processed == 255)      # extracting only white pixels 
-        # black_pixel_count = np.sum(area_processed == 0)        # extracting only black pixels 
-        # total_pixel_count = white_pixel_count + black_pixel_count
-
-        # if white_pixel_count/total_pixel_count < .4:
-        #     print_debug('contour is mostly whitespace, skipping.')
-        #     continue
-
         dst = cv2.warpAffine(img, M, (img.shape[1], img.shape[0]))
-        area = cv2.bitwise_not(cv2.getRectSubPix(dst, size, center))
+        area = cv2.getRectSubPix(dst, size, center)
 
         if theta > 45:
             area = cv2.rotate(area, cv2.ROTATE_90_CLOCKWISE)
 
         if area is not None:
+
             print_debug('adding potential text area to list')
             aligned_areas.append(area)
-            centroids.append(center)
 
             box = cv2.boxPoints(rect) 
             box = np.intp(box)
@@ -120,18 +111,18 @@ def get_potential_text_areas(img, processed):
 
     print_debug('sorting potential text areas by size')
     aligned_areas = sorted(aligned_areas, key=lambda item: item.shape[0]*item.shape[1])
+    if debug_mode:
+        cv2.imwrite('logs/processed_highlighted_text_areas.jpg', processed_show)
+        cv2.imshow('intermediate', cv2.resize(processed_show, (1000,1000)))
+    return aligned_areas
 
-    return aligned_areas, centroids, processed_show
+def assemble_text_scan_image(areas):
 
-def assemble_text_scan_image(img, areas, centroids):
+    margin = 30
 
     #clear composite scan and parallel colors
     totalScan.fill(255)
     scan_colors.fill(255)
-
-    #parallel to scan but contains (x,y) positions of centroids of contours
-    #used to lookup original location of a text result using its position in the composite scan image
-    centroid_location_buffer = np.zeros([2000,1000,3], dtype="float32")
 
     hScan, wScan = totalScan.shape
 
@@ -143,13 +134,12 @@ def assemble_text_scan_image(img, areas, centroids):
         print_debug(f'Text area #{i}/{len(areas)}:')
 
         area = areas[i]
-        cent = centroids[i]
 
         print_debug('pre-processing area for text detection')
         processed = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
         # norm_matrix = np.zeros((img.shape[0], img.shape[1]))
         # processed = cv2.normalize(processed, norm_matrix, 0, 255, cv2.NORM_MINMAX)
-        processed = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY_INV +cv2.THRESH_OTSU)[1]
+        processed = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY +cv2.THRESH_OTSU)[1]
 
         h, w = processed.shape
 
@@ -158,7 +148,6 @@ def assemble_text_scan_image(img, areas, centroids):
             if xOff + w < wScan:
                 totalScan[yOff:yOff+h, xOff: xOff+w] = processed
                 scan_colors[yOff:yOff+h, xOff: xOff+w] = area
-                cv2.rectangle(centroid_location_buffer, (xOff, yOff), (xOff + w, yOff + h), (cent[0]/1000,cent[1]/1000,0), -1)
                 xOff += (w + margin)
                 row_height = max(row_height, h)
             else:
@@ -167,7 +156,6 @@ def assemble_text_scan_image(img, areas, centroids):
                 yOff += row_height + margin
                 totalScan[yOff:yOff+h, xOff: xOff+w] = processed
                 scan_colors[yOff:yOff+h, xOff: xOff+w] = area
-                cv2.rectangle(centroid_location_buffer, (xOff, yOff), (xOff + w, yOff + h), (cent[0],cent[1],0), -1)
                 xOff += w + margin
                 row_height = 0
             print_debug('adding area to composite scan image')
@@ -175,23 +163,24 @@ def assemble_text_scan_image(img, areas, centroids):
             print_debug('Error adding area to composite scan image.')
             pass
 
-    return totalScan, scan_colors, centroid_location_buffer
+    if debug_mode:
+        cv2.imwrite('logs/scan_image.jpg', totalScan)
+        cv2.imwrite('logs/scan_image_color.jpg', scan_colors)
 
-def text_data_from_image(img, buffer):
+    return totalScan, scan_colors
+
+def text_data_from_image(img):
     print_debug("Retrieving text from scan image with Tesseract")
-    data = pytesseract.image_to_data(img, lang="eng", config='--psm 4').split('\n')[:-1] #ignore last item
+    data = pytesseract.image_to_data(img, lang="eng", config='--psm 12').split('\n')[:-1] #ignore last item
     data_labels = data[0].split('\t')
     data_values = [row.split('\t') for row in data[1:]]
     data_entries = [dict(zip(data_labels, entry)) for entry in data_values]
-    # for row in data_entries:
-    #     row['centerX'] = int(float(row['left']) + float(row['width'])/2)
-    #     row['centerY'] = int(float(row['top']) + float(row['height'])/2)
-    #     row['orig_point'] = buffer[row['centerY'], row['centerX']][:2]*1000
+
     return data_entries
 
 def overlay_results(img, data, scan):
 
-    resultYOff = margin
+    resultYOff = result_margin
     for i in range(len(data)):
         row = data[i]
         print_debug(f"text result #{i}/{len(data)}:")
@@ -210,21 +199,23 @@ def overlay_results(img, data, scan):
         if len([char for char in row['text'] if char.isalpha() or char.isdigit()]) == 0:
             print_debug('Text result contains no letters or numbers. Skipping.')
             continue
-
+        
         try:
-            img[resultYOff:resultYOff+h, margin:margin+w] = scan[y:y+h, x:x+w]
-            cv2.putText(img, row['text'], (margin + w + 30, resultYOff+h), cv2.FONT_HERSHEY_PLAIN, h/10, (0,255,0), h//10)
+            img[resultYOff:resultYOff+h, result_margin:result_margin+w] = scan[y:y+h, x:x+w]
+            cv2.putText(img, row['text'], (result_margin + w + 30, resultYOff+h), cv2.FONT_HERSHEY_PLAIN, h/10, (255,100,100), h//7)
             print_debug("overlaying detected text and UTF-encoded result.")
         except:
             print_debug("Error overlaying detected text and UTF-encoded result.")
 
-        resultYOff += margin + h
+        resultYOff += result_margin + h
 
     return img
 
 def complete_text_from_image(input):
 
     shape_orig = input.shape
+
+    cv2.imwrite('logs/input_frame.jpg', input)
 
     print_debug(f"\nInput image size: {str(shape_orig)} - enlarging image, maintaining proportions...")
     ratio = input.shape[1]/input.shape[0]
@@ -235,24 +226,21 @@ def complete_text_from_image(input):
 
     print_debug("\nFinding potential text areas from contour data...")
     #detect areas containing long contours that may be text
-    areas, centroids, contour_highlights = get_potential_text_areas(input, processed)
-
-    if show_intermediate:
-        cv2.imshow('intermediate', cv2.resize(contour_highlights, (1000,1000)))
+    areas = get_potential_text_areas(input, processed)
 
     #get single image containing text areas to be scanned and parallel colored version for visuals
     print_debug("\nAssembling text areas into single image for text detection...")
-    scan_image, colors, buffer = assemble_text_scan_image(input, areas, centroids)
+    scan_image, colors = assemble_text_scan_image(areas)
 
-    if show_intermediate:
+    if debug_mode:
         cv2.imshow('composite scan image', scan_image)
         cv2.waitKey(5)
 
     #scan single image for text
     print_debug("\nGathering formatted text data from image...")
-    text_results = text_data_from_image(scan_image, buffer)
-    results_filtered = [row for row in text_results if float(row['conf']) > 60 and 
-                        len(row['text']) > 1 and not '?' in row['text']] 
+    text_results = text_data_from_image(scan_image)
+    results_filtered = [row for row in text_results if float(row['conf']) > 70 and 
+                        len(row['text']) > 1] 
 
     #overlay detected text and extracted string side-by-side on top of captured frame
     print_debug("\nDisplaying results...")
@@ -386,12 +374,13 @@ def main(args):
         print('or run "OCR.py list" to list available camera input devices.')         
 
 #single blank image to store all potential text areas together for efficient OCR
-totalScan = np.zeros([3000,3000],dtype=np.uint8) 
-scan_colors = np.ones([3000,3000, 3], dtype=np.uint8) * 255
+totalScan = np.zeros([10000,2000],dtype=np.uint8) 
+scan_colors = np.ones([10000,2000, 3], dtype=np.uint8) * 255
+centroid_location_buffer = np.zeros([2000,1000,3], dtype="float32")
 
 try:
     main(argv[1:])
 except Exception as e:
-    logFile.write(traceback.format_exc())
-    print
+    if debug_mode:
+        logFile.write(traceback.format_exc())
     raise e
