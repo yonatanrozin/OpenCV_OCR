@@ -22,7 +22,8 @@ capture_api = cv2.CAP_DSHOW
 # capture_api = cv2.CAP_MSMF
 # capture_api = None
 
-# pytesseract.pytesseract.tesseract_cmd = r''
+# uncomment this line to manually provide path to tesseract executable file
+# pytesseract.pytesseract.tesseract_cmd = '' # add path to executable here
 
 result_margin = 10 # margin width (in px) between text areas / image borders
 
@@ -62,7 +63,7 @@ def preprocess_frame(img):
 #   a parallel list containing central coordinates for each corresponding rectangle
 def get_potential_text_areas(img, processed):
 
-    processed_show = processed.copy()
+    processed_show = img.copy()
 
     print_debug('retrieving contours')
     contours, hierarchy = cv2.findContours(processed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -105,7 +106,7 @@ def get_potential_text_areas(img, processed):
 
             box = cv2.boxPoints(rect) 
             box = np.intp(box)
-            cv2.drawContours(processed_show,[box],0,(255,255,255),1)
+            cv2.drawContours(processed_show,[box],0,(0,0,0),2)
         else:
             print_debug("invalid area extracted. Skipping.")
 
