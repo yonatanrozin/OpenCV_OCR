@@ -22,7 +22,7 @@ capture_api = cv2.CAP_DSHOW
 # capture_api = cv2.CAP_MSMF
 # capture_api = None
 
-# pytesseract.pytesseract.tesseract_cmd = r'./Tesseract-OCR/tesseract.exe'
+# pytesseract.pytesseract.tesseract_cmd = r''
 
 result_margin = 10 # margin width (in px) between text areas / image borders
 
