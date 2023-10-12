@@ -15,6 +15,9 @@ Performs OCR from webcam feed, image or video file. Short demo video can be foun
 - ```git clone``` this repo into desired location
  
 ## Usage
+### Pytesseract initialization
+Tesseract must be installed and added to system PATH before pytesseract will work. See [here](https://tesseract-ocr.github.io/tessdoc/Installation.html) for installation instructions. The installation can be tested by running ```tesseract``` in a command prompt. If tesseract has been installed but doesn't work in Python, uncomment the line ```pytesseract.pytesseract.tesseract_cmd = r'<full_path_to_your_tesseract_executable>``` in OCR.py, providing the absolute path to the ```tesseract.exe``` file in the Tesseract directory.
+
 ### OpenCV camera setup (if using with webcam)
 Code to open camera will differ per device. Change your camera index by changing the line ```cam_index = 0``` towards the top of OCR.py. Run ```OCR.py list``` to get a list of available camera indexes. Additionally, your camera may require a specific video capture API. You can use one by uncommenting one of the ```capture_api = ...``` lines below the cam_index line. More info about capture APIs can be found in the [OpenCV capture API docs](https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html#ga023786be1ee68a9105bf2e48c700294d).
 ### Running
@@ -27,6 +30,3 @@ Code to open camera will differ per device. Change your camera index by changing
   - ```<debug>```: include ```debug``` as the last argument to run in debug mode.
     - Opens additional windows containing intermediate OpenCV matrices generated during text scanning
     - Prints additional status messages to console, as well as writing them to a ```log.txt``` file.
-   
-## Pytesseract troubleshooting
-Tesseract must be installed and added to system PATH before pytesseract will work. See [here](https://tesseract-ocr.github.io/tessdoc/Installation.html) for installation instructions. The installation can be tested by running ```tesseract``` in a command prompt. If tesseract has been installed but doesn't work in Python, uncomment the line ```pytesseract.pytesseract.tesseract_cmd = r'<full_path_to_your_tesseract_executable>``` in OCR.py, providing the absolute path to the ```tesseract.exe``` file in the Tesseract directory.
