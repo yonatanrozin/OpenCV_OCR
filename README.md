@@ -11,7 +11,7 @@ Performs OCR from webcam feed, image or video file. Short demo video can be foun
   - __Be sure [OpenCV-Python-Headless](https://pypi.org/project/opencv-python-headless/) is not installed!__ 
 - Tesseract OCR - tested with version 5.3.3
   - See installation instructions [here](https://tesseract-ocr.github.io/tessdoc/Installation.html)
-  - Be sure to include path to tesseract.exe in system PATH. Test installation by running 'tesseract' in prompt
+  - Be sure to include tesseract in system PATH to complete installation. Test installation by running ```tesseract``` in command prompt.
 - ```git clone``` this repo into desired location
  
 ## Usage
