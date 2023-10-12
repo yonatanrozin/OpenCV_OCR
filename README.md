@@ -1,5 +1,5 @@
 # OpenCV_OCR
-Performs OCR from webcam feed, image or video file.
+Performs OCR from webcam feed, image or video file. Short demo video can be found [here](https://youtu.be/0hRKdiFr_Xs).
 
 ## Dependencies and installation
 - [Python](https://www.python.org/) - tested with version 3.11.6
