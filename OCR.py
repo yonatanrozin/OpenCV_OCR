@@ -18,9 +18,9 @@ while time.time() - launch_time < 2:
 
 #camera index and capture API (optional)
 cam_index = 0
-capture_api = cv2.CAP_DSHOW
+# capture_api = cv2.CAP_DSHOW
 # capture_api = cv2.CAP_MSMF
-# capture_api = None
+capture_api = None
 
 # uncomment this line to manually provide path to tesseract executable file
 # pytesseract.pytesseract.tesseract_cmd = '' # add path to executable here
